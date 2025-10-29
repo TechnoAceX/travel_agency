@@ -1,6 +1,20 @@
 <?php
 session_start();
 
+// Database configuration
+$host = 'localhost';
+$dbname = 'travel_agency';
+$username = 'root';
+$password = '';
+
+// Create database connection
+try {
+    $conn = new PDO("mysql:host=$host;dbname=$dbname", $username, $password);
+    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch(PDOException $e) {
+    die("Connection failed: " . $e->getMessage());
+}
+
 // Initialize message variable
 $message = '';
 if (isset($_SESSION['message'])) {
@@ -55,10 +69,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking'])) {
     $date = htmlspecialchars($_POST['date']);
     $guests = htmlspecialchars($_POST['guests']);
     
-    // In a real application, you would save this to a database
-    $_SESSION['message'] = "Thank you, $name! Your booking request for $destination has been received. We'll contact you at $email shortly.";
-    header('Location: ' . $_SERVER['PHP_SELF'] . '?page=home');
-    exit;
+    // Insert into database
+    try {
+        $stmt = $conn->prepare("INSERT INTO bookings (name, email, destination, travel_date, guests, booking_date) VALUES (?, ?, ?, ?, ?, NOW())");
+        $stmt->execute([$name, $email, $destination, $date, $guests]);
+        
+        $_SESSION['message'] = "Thank you, $name! Your booking request for $destination has been received. We'll contact you at $email shortly.";
+        header('Location: ' . $_SERVER['PHP_SELF'] . '?page=home');
+        exit;
+    } catch(PDOException $e) {
+        $_SESSION['message'] = "Error: " . $e->getMessage();
+    }
+}
+
+// Handle delete booking
+if (isset($_GET['delete'])) {
+    $id = intval($_GET['delete']);
+    try {
+        $stmt = $conn->prepare("DELETE FROM bookings WHERE id = ?");
+        $stmt->execute([$id]);
+        $_SESSION['message'] = "Booking deleted successfully!";
+        header('Location: ' . $_SERVER['PHP_SELF'] . '?page=admin');
+        exit;
+    } catch(PDOException $e) {
+        $_SESSION['message'] = "Error deleting booking: " . $e->getMessage();
+    }
+}
+
+// Fetch all bookings for admin page
+if ($page === 'admin') {
+    try {
+        $stmt = $conn->query("SELECT * FROM bookings ORDER BY booking_date DESC");
+        $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch(PDOException $e) {
+        $bookings = [];
+        $message = "Error fetching bookings: " . $e->getMessage();
+    }
 }
 ?>
 
@@ -152,6 +198,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking'])) {
         .btn:hover {
             transform: translateY(-2px);
             background: #5568d3;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .btn-small {
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
         }
 
         .container {
@@ -253,6 +312,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking'])) {
             text-align: center;
         }
 
+        .error-message {
+            background: #e74c3c;
+            color: white;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
         .footer {
             background: #333;
             color: white;
@@ -279,6 +347,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking'])) {
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
         }
 
+        /* Admin Table Styles */
+        .admin-table {
+            width: 100%;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .admin-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .admin-table th {
+            background: #667eea;
+            color: white;
+            padding: 1rem;
+            text-align: left;
+            font-weight: bold;
+        }
+
+        .admin-table td {
+            padding: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+
+        .admin-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .admin-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            font-size: 2.5rem;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-card p {
+            color: #666;
+            font-size: 1.1rem;
+        }
+
         @media (max-width: 768px) {
             .about-content {
                 grid-template-columns: 1fr;
@@ -290,6 +415,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking'])) {
 
             .nav-menu {
                 gap: 1rem;
+                font-size: 0.9rem;
+            }
+
+            .admin-table {
+                overflow-x: auto;
             }
         }
     </style>
@@ -303,6 +433,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking'])) {
                 <li><a href="?page=destinations">Destinations</a></li>
                 <li><a href="?page=booking">Book Now</a></li>
                 <li><a href="?page=about">About</a></li>
+                <li><a href="?page=admin">📊 Admin</a></li>
             </ul>
         </nav>
     </header>
@@ -392,6 +523,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking'])) {
                 </div>
                 <button type="submit" name="booking" class="btn">Submit Booking Request</button>
             </form>
+        </div>
+
+    <?php elseif ($page === 'admin'): ?>
+        <div class="container">
+            <h2 class="section-title">📊 Bookings Dashboard</h2>
+            
+            <?php if ($message): ?>
+                <div class="<?php echo strpos($message, 'Error') !== false ? 'error-message' : 'success-message'; ?>">
+                    <?php echo $message; ?>
+                </div>
+            <?php endif; ?>
+
+            <div class="admin-stats">
+                <div class="stat-card">
+                    <h3><?php echo isset($bookings) ? count($bookings) : 0; ?></h3>
+                    <p>Total Bookings</p>
+                </div>
+                <div class="stat-card">
+                    <h3><?php 
+                        if (isset($bookings)) {
+                            echo array_sum(array_column($bookings, 'guests'));
+                        } else {
+                            echo 0;
+                        }
+                    ?></h3>
+                    <p>Total Guests</p>
+                </div>
+            </div>
+
+            <div class="admin-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Destination</th>
+                            <th>Travel Date</th>
+                            <th>Guests</th>
+                            <th>Booking Date</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (isset($bookings) && count($bookings) > 0): ?>
+                            <?php foreach ($bookings as $booking): ?>
+                                <tr>
+                                    <td><?php echo $booking['id']; ?></td>
+                                    <td><?php echo htmlspecialchars($booking['name']); ?></td>
+                                    <td><?php echo htmlspecialchars($booking['email']); ?></td>
+                                    <td><?php echo htmlspecialchars($booking['destination']); ?></td>
+                                    <td><?php echo date('M d, Y', strtotime($booking['travel_date'])); ?></td>
+                                    <td><?php echo $booking['guests']; ?></td>
+                                    <td><?php echo date('M d, Y H:i', strtotime($booking['booking_date'])); ?></td>
+                                    <td>
+                                        <a href="?page=admin&delete=<?php echo $booking['id']; ?>" 
+                                           class="btn btn-danger btn-small" 
+                                           onclick="return confirm('Are you sure you want to delete this booking?')">
+                                            Delete
+                                        </a>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="8" style="text-align: center; padding: 2rem;">
+                                    No bookings found. Start by creating some bookings!
+                                </td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
     <?php elseif ($page === 'about'): ?>
